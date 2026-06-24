@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if release is needed
+        id: check
+        run: |
+          HEAD_SUBJECT="$(git log -1 --format=%s HEAD)"
+          if [[ "$HEAD_SUBJECT" =~ ^chore\(release\): ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping: HEAD is already a release commit."
+            exit 0
+          fi
+
+          LAST_RELEASE_SHA="$(git log --format=%H HEAD --no-merges | while read -r sha; do
+            if [[ $(git log -1 --format=%s "$sha") =~ ^chore\(release\): ]]; then
+              echo "$sha"
+              break
+            fi
+          done)"
+
+          if [ -n "$LAST_RELEASE_SHA" ]; then
+            ANALYZE_RANGE="${LAST_RELEASE_SHA}..HEAD"
+          else
+            ROOT_SHA="$(git rev-list --max-parents=0 HEAD)"
+            ANALYZE_RANGE="${ROOT_SHA}..HEAD"
+          fi
+
+          echo "analyze_range=${ANALYZE_RANGE}" >> "$GITHUB_OUTPUT"
+
+          NEW_COUNT="$(git rev-list --count --no-merges "${ANALYZE_RANGE}" 2>/dev/null || echo 0)"
+          if [ "$NEW_COUNT" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping: no releasable commits since last release."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Will release ${NEW_COUNT} commit(s) from: ${ANALYZE_RANGE}"
+          fi
+
+      - name: Bump VERSION and CHANGELOG on main
+        if: steps.check.outputs.skip != 'true'
+        id: bump
+        env:
+          ANALYZE_RANGE: ${{ steps.check.outputs.analyze_range }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash .github/scripts/bump-version.sh
+
+      - name: Commit release to main
+        if: steps.check.outputs.skip != 'true'
+        id: commit
+        run: |
+          if git diff --quiet VERSION CHANGELOG.md; then
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "No version file changes produced."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
+          git add VERSION CHANGELOG.md
+          git commit -m "chore(release): bump version to ${NEW_VERSION}"
+          git push origin main
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Tag release on main
+        if: steps.commit.outputs.released == 'true'
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          VERSION="${VERSION#v}"
+          TAG="v${VERSION}"
+
+          git fetch origin --tags
+
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists locally."
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on remote."
+            exit 0
+          fi
+
+          git tag -a "${TAG}" -m "Release ${VERSION}"
+          git push origin "${TAG}"
+          echo "Created and pushed tag ${TAG}"
