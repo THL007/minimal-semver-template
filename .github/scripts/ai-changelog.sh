@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# Generate Keep a Changelog markdown via OpenRouter from a commit dump JSON.
+# Generate changelog markdown via OpenRouter from a commit dump JSON.
 # Reads JSON from $1 (or stdin). Writes markdown to stdout.
 # Env:
-#   OPENROUTER_API_KEY  (required)
-#   OPENROUTER_MODEL    (default: openai/gpt-4o-mini)
-#   TODAY               (default: UTC today)
+#   OPENROUTER_API_KEY     (required)
+#   OPENROUTER_MODEL       (default: openai/gpt-4o-mini)
+#   TODAY                  (default: UTC today)
+#   CHANGELOG_AUDIENCE     internal | external (default: internal)
 set -euo pipefail
 
 INPUT_FILE="${1:-}"
 MODEL="${OPENROUTER_MODEL:-openai/gpt-4o-mini}"
 TODAY="${TODAY:-$(date -u +%Y-%m-%d)}"
 API_URL="${OPENROUTER_API_URL:-https://openrouter.ai/api/v1/chat/completions}"
+AUDIENCE="${CHANGELOG_AUDIENCE:-internal}"
 
 if [ -z "${OPENROUTER_API_KEY:-}" ]; then
   echo "OPENROUTER_API_KEY is not set" >&2
@@ -28,23 +30,44 @@ if [ -z "$DUMP" ] || [ "$DUMP" = "[]" ]; then
   exit 1
 fi
 
-SYSTEM_PROMPT="$(cat <<'EOF'
-You write release notes in Keep a Changelog format.
+if [ "$AUDIENCE" = "external" ]; then
+  SYSTEM_PROMPT="$(cat <<'EOF'
+You write simple, user-friendly release notes for non-technical readers.
+
+Rules:
+- Output ONLY markdown. No preamble, no code fences, no commentary.
+- One section per version in the dump, newest first.
+- Heading format exactly: ## EMOJI VERSION — DATE
+  Use one emoji in the heading (✨ new stuff, 🐛 fixes, ⚡ faster, 🔧 changes, 💥 breaking).
+- Each bullet MUST start with an emoji, then a short plain-language sentence.
+- No conventional-commit jargon, no scopes, no (major)/(minor)/(patch) tags.
+- Avoid words like "refactor", "CI", "API", "pipeline" unless the user would understand them.
+- Do not invent features. Keep 1–3 bullets per version.
+- Prefer friendly tone: "You can now…" / "We fixed…" / "Things feel snappier when…"
+EOF
+)"
+  HEADING_CHECK='^## .+ [0-9]+\.[0-9]+\.[0-9]+'
+else
+  SYSTEM_PROMPT="$(cat <<'EOF'
+You write internal release notes in Keep a Changelog format for maintainers.
 
 Rules:
 - Output ONLY markdown. No preamble, no code fences, no commentary.
 - One section per object in the dump, newest version first.
 - Heading format exactly: ## [VERSION] - DATE
 - Use only these subsection headings when relevant: ### Added, ### Changed, ### Fixed, ### Removed, ### Deprecated, ### Security
-- Turn raw commit subjects/bodies into clear, user-facing bullet points (1–3 bullets per version).
+- Turn raw commit subjects/bodies into precise technical bullet points (1–3 bullets per version).
 - Drop conventional-commit noise: type prefixes, scopes, and trailing (major)/(minor)/(patch) tags.
 - Do not invent features that are not supported by the commit dump.
 - Prefer concrete wording over vague phrases like "various improvements".
 EOF
 )"
+  HEADING_CHECK='^## \[[0-9]+\.[0-9]+\.[0-9]+\]'
+fi
 
 USER_PROMPT="$(cat <<EOF
 DATE for all headings: ${TODAY}
+Audience: ${AUDIENCE}
 
 Commit dump (JSON array, already ordered oldest → newest; reverse for output):
 ${DUMP}
@@ -91,7 +114,6 @@ if [ -z "$CONTENT" ]; then
   exit 1
 fi
 
-# Strip accidental markdown fences.
 CONTENT="$(
   printf '%s\n' "$CONTENT" | sed -E '
     1{/^```([a-zA-Z0-9_-]*)?$/d;}
@@ -99,8 +121,8 @@ CONTENT="$(
   '
 )"
 
-if ! grep -qE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' <<<"$CONTENT"; then
-  echo "OpenRouter output missing version headings:" >&2
+if ! grep -qE "$HEADING_CHECK" <<<"$CONTENT"; then
+  echo "OpenRouter output missing version headings (audience=${AUDIENCE}):" >&2
   printf '%s\n' "$CONTENT" >&2
   exit 1
 fi

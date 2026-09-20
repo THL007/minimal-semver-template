@@ -5,16 +5,22 @@
 # Bump VERSION from commit history (sequential unless sequential_bumps is false)
 version_bump: true
 
-# Update CHANGELOG.md during release
+# Master switch for both changelog files (false disables internal + external)
 changelog: true
 
-# Rewrite changelog via OpenRouter (needs OPENROUTER_API_KEY secret)
+# Technical Keep a Changelog notes → CHANGELOG.md
+changelog_internal: true
+
+# Simple emoji user-facing notes → CHANGELOG.external.md
+changelog_external: true
+
+# Rewrite changelogs via OpenRouter (needs OPENROUTER_API_KEY secret)
 ai_changelog: false
 
 # If AI fails, keep the heuristic changelog instead of failing the job
 ai_changelog_fallback: true
 
-# Commit VERSION/CHANGELOG back to main as chore(release):
+# Commit VERSION/CHANGELOG* back to main as chore(release):
 commit_release: true
 
 # Push annotated tag vX.Y.Z for the final version (requires commit_release)

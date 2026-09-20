@@ -10,11 +10,19 @@ on:
         type: boolean
         default: true
       changelog:
-        description: "Update CHANGELOG.md"
+        description: "Master switch for changelog updates"
+        type: boolean
+        default: true
+      changelog_internal:
+        description: "Update technical CHANGELOG.md"
+        type: boolean
+        default: true
+      changelog_external:
+        description: "Update emoji CHANGELOG.external.md"
         type: boolean
         default: true
       ai_changelog:
-        description: "Rewrite changelog via OpenRouter"
+        description: "Rewrite changelogs via OpenRouter"
         type: boolean
         default: false
       commit_release:
@@ -62,6 +70,8 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             export RELEASE_VERSION_BUMP='${{ inputs.version_bump }}'
             export RELEASE_CHANGELOG='${{ inputs.changelog }}'
+            export RELEASE_CHANGELOG_INTERNAL='${{ inputs.changelog_internal }}'
+            export RELEASE_CHANGELOG_EXTERNAL='${{ inputs.changelog_external }}'
             export RELEASE_AI_CHANGELOG='${{ inputs.ai_changelog }}'
             export RELEASE_COMMIT_RELEASE='${{ inputs.commit_release }}'
             export RELEASE_TAG_RELEASE='${{ inputs.tag_release }}'
@@ -73,9 +83,11 @@ jobs:
       - name: Check if release is needed
         id: check
         run: |
-          if [[ "${{ steps.switches.outputs.RELEASE_VERSION_BUMP }}" != "true" && "${{ steps.switches.outputs.RELEASE_CHANGELOG }}" != "true" ]]; then
+          if [[ "${{ steps.switches.outputs.RELEASE_VERSION_BUMP }}" != "true" \
+            && "${{ steps.switches.outputs.RELEASE_CHANGELOG_INTERNAL }}" != "true" \
+            && "${{ steps.switches.outputs.RELEASE_CHANGELOG_EXTERNAL }}" != "true" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping: version_bump and changelog are both disabled."
+            echo "Skipping: version_bump and both changelogs are disabled."
             exit 0
           fi
 
@@ -121,6 +133,8 @@ jobs:
           OPENROUTER_MODEL: ${{ steps.switches.outputs.OPENROUTER_MODEL }}
           RELEASE_VERSION_BUMP: ${{ steps.switches.outputs.RELEASE_VERSION_BUMP }}
           RELEASE_CHANGELOG: ${{ steps.switches.outputs.RELEASE_CHANGELOG }}
+          RELEASE_CHANGELOG_INTERNAL: ${{ steps.switches.outputs.RELEASE_CHANGELOG_INTERNAL }}
+          RELEASE_CHANGELOG_EXTERNAL: ${{ steps.switches.outputs.RELEASE_CHANGELOG_EXTERNAL }}
           RELEASE_AI_CHANGELOG: ${{ steps.switches.outputs.RELEASE_AI_CHANGELOG }}
           RELEASE_AI_CHANGELOG_FALLBACK: ${{ steps.switches.outputs.RELEASE_AI_CHANGELOG_FALLBACK }}
           RELEASE_SEQUENTIAL_BUMPS: ${{ steps.switches.outputs.RELEASE_SEQUENTIAL_BUMPS }}
@@ -131,11 +145,9 @@ jobs:
         if: steps.check.outputs.skip != 'true' && steps.switches.outputs.RELEASE_COMMIT_RELEASE == 'true'
         id: commit
         run: |
-          FILES=()
-          git diff --quiet VERSION || FILES+=(VERSION)
-          git diff --quiet CHANGELOG.md || FILES+=(CHANGELOG.md)
+          git add VERSION CHANGELOG.md CHANGELOG.external.md 2>/dev/null || true
 
-          if [ "${#FILES[@]}" -eq 0 ]; then
+          if git diff --cached --quiet; then
             echo "released=false" >> "$GITHUB_OUTPUT"
             echo "No version file changes produced."
             exit 0
@@ -145,7 +157,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
-          git add "${FILES[@]}"
           git commit -m "chore(release): bump version to ${NEW_VERSION}"
           git push origin main
           echo "released=true" >> "$GITHUB_OUTPUT"

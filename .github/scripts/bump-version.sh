@@ -14,13 +14,23 @@ fi
 
 RELEASE_VERSION_BUMP="${RELEASE_VERSION_BUMP:-true}"
 RELEASE_CHANGELOG="${RELEASE_CHANGELOG:-true}"
+RELEASE_CHANGELOG_INTERNAL="${RELEASE_CHANGELOG_INTERNAL:-true}"
+RELEASE_CHANGELOG_EXTERNAL="${RELEASE_CHANGELOG_EXTERNAL:-true}"
 RELEASE_AI_CHANGELOG="${RELEASE_AI_CHANGELOG:-false}"
 RELEASE_AI_CHANGELOG_FALLBACK="${RELEASE_AI_CHANGELOG_FALLBACK:-true}"
 RELEASE_SEQUENTIAL_BUMPS="${RELEASE_SEQUENTIAL_BUMPS:-true}"
 RELEASE_INTERMEDIATE_CHANGELOG="${RELEASE_INTERMEDIATE_CHANGELOG:-true}"
 
-if [ "$RELEASE_VERSION_BUMP" != true ] && [ "$RELEASE_CHANGELOG" != true ]; then
-  echo "version_bump and changelog are both disabled; nothing to do."
+# Master changelog switch gates both audiences.
+if [ "$RELEASE_CHANGELOG" != true ]; then
+  RELEASE_CHANGELOG_INTERNAL=false
+  RELEASE_CHANGELOG_EXTERNAL=false
+fi
+
+if [ "$RELEASE_VERSION_BUMP" != true ] \
+  && [ "$RELEASE_CHANGELOG_INTERNAL" != true ] \
+  && [ "$RELEASE_CHANGELOG_EXTERNAL" != true ]; then
+  echo "version_bump and both changelogs are disabled; nothing to do."
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "bumped=false" >> "$GITHUB_OUTPUT"
   fi
@@ -149,7 +159,48 @@ strip_commit_prefix() {
   echo "$subject"
 }
 
-write_fallback_changelog() {
+emoji_for_commit() {
+  local subject="$1"
+  local bump="$2"
+  if [[ "$bump" == "major" ]]; then
+    echo "💥"
+  elif [[ "$subject" == feat* ]] || [[ "$bump" == "minor" ]]; then
+    echo "✨"
+  elif [[ "$subject" == fix* ]]; then
+    echo "🐛"
+  elif [[ "$subject" == perf* ]]; then
+    echo "⚡"
+  elif [[ "$subject" == docs* ]]; then
+    echo "📝"
+  elif [[ "$subject" == refactor* ]]; then
+    echo "🔧"
+  else
+    echo "📦"
+  fi
+}
+
+heading_emoji_for_bump() {
+  case "$1" in
+    major) echo "💥" ;;
+    minor) echo "✨" ;;
+    patch) echo "🐛" ;;
+    *) echo "📦" ;;
+  esac
+}
+
+insert_before_first_heading() {
+  local target="$1"
+  local entry_file="$2"
+  awk -v entry_file="$entry_file" '
+    BEGIN { while ((getline line < entry_file) > 0) entry = entry line "\n"; close(entry_file) }
+    /^## / && !inserted { print entry; inserted=1 }
+    { print }
+    END { if (!inserted) print entry }
+  ' "$target" > "${target}.tmp"
+  mv "${target}.tmp" "$target"
+}
+
+write_fallback_internal() {
   local i subject version bump summary
 
   if [ "$RELEASE_INTERMEDIATE_CHANGELOG" = true ]; then
@@ -179,11 +230,10 @@ write_fallback_changelog() {
         echo "- ${summary}"
         echo ""
       done
-    } > /tmp/changelog-entry.md
+    } > /tmp/changelog-internal-entry.md
     return
   fi
 
-  # Single section for the final version, bullets for every commit.
   {
     echo "## [${NEW_VERSION}] - ${TODAY}"
     echo ""
@@ -218,7 +268,80 @@ write_fallback_changelog() {
     if [ "${#other[@]}" -gt 0 ]; then
       echo "### Other"; echo ""; printf '%s\n' "${other[@]}"; echo ""
     fi
-  } > /tmp/changelog-entry.md
+  } > /tmp/changelog-internal-entry.md
+}
+
+write_fallback_external() {
+  local i subject version bump summary emoji hemoji
+
+  if [ "$RELEASE_INTERMEDIATE_CHANGELOG" = true ]; then
+    {
+      for ((i = ${#CHANGE_SUBJECTS[@]} - 1; i >= 0; i--)); do
+        subject="${CHANGE_SUBJECTS[$i]}"
+        version="${CHANGE_VERSIONS[$i]}"
+        bump="${CHANGE_BUMPS[$i]}"
+        summary="$(strip_commit_prefix "$subject")"
+        emoji="$(emoji_for_commit "$subject" "$bump")"
+        hemoji="$(heading_emoji_for_bump "$bump")"
+        echo "## ${hemoji} ${version} — ${TODAY}"
+        echo ""
+        echo "- ${emoji} ${summary}"
+        echo ""
+      done
+    } > /tmp/changelog-external-entry.md
+    return
+  fi
+
+  {
+    hemoji="$(heading_emoji_for_bump "$HIGHEST_BUMP")"
+    echo "## ${hemoji} ${NEW_VERSION} — ${TODAY}"
+    echo ""
+    for ((i = 0; i < ${#CHANGE_SUBJECTS[@]}; i++)); do
+      subject="${CHANGE_SUBJECTS[$i]}"
+      bump="${CHANGE_BUMPS[$i]}"
+      summary="$(strip_commit_prefix "$subject")"
+      emoji="$(emoji_for_commit "$subject" "$bump")"
+      echo "- ${emoji} ${summary}"
+    done
+    echo ""
+  } > /tmp/changelog-external-entry.md
+}
+
+maybe_ai_changelog() {
+  local audience="$1"
+  local out_file="$2"
+  local fallback_file="$3"
+
+  if [ "$fallback_file" != "$out_file" ]; then
+    cp "$fallback_file" "$out_file"
+  fi
+
+  if [ "$RELEASE_AI_CHANGELOG" != true ]; then
+    return 0
+  fi
+
+  if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+    echo "ai_changelog enabled but OPENROUTER_API_KEY is unset (${audience})." >&2
+    if [ "$RELEASE_AI_CHANGELOG_FALLBACK" != true ]; then
+      return 1
+    fi
+    echo "Using heuristic ${audience} changelog fallback."
+    return 0
+  fi
+
+  echo "Generating ${audience} changelog via OpenRouter (${OPENROUTER_MODEL:-openai/gpt-4o-mini})..."
+  if TODAY="$TODAY" CHANGELOG_AUDIENCE="$audience" \
+    bash "${SCRIPT_DIR}/ai-changelog.sh" "$DUMP_FILE" > "${out_file}.ai"; then
+    mv "${out_file}.ai" "$out_file"
+    echo "AI ${audience} changelog applied."
+  else
+    echo "AI ${audience} changelog failed." >&2
+    rm -f "${out_file}.ai"
+    if [ "$RELEASE_AI_CHANGELOG_FALLBACK" != true ]; then
+      return 1
+    fi
+    echo "Using heuristic ${audience} changelog fallback."
+  fi
 }
 
 CURRENT="$(tr -d '[:space:]' < VERSION)"
@@ -325,65 +448,60 @@ DUMP_FILE="/tmp/release-commits.json"
 } > "$DUMP_FILE"
 echo "Commit dump written to ${DUMP_FILE}"
 
-if [ "$RELEASE_CHANGELOG" = true ]; then
-  write_fallback_changelog
+if [ "$RELEASE_CHANGELOG_INTERNAL" = true ] || [ "$RELEASE_CHANGELOG_EXTERNAL" = true ]; then
+  if [ "$RELEASE_CHANGELOG_INTERNAL" = true ]; then
+    write_fallback_internal
+    maybe_ai_changelog internal /tmp/changelog-internal-entry.md /tmp/changelog-internal-entry.md \
+      || exit 1
+    insert_before_first_heading CHANGELOG.md /tmp/changelog-internal-entry.md
 
-  if [ "$RELEASE_AI_CHANGELOG" = true ]; then
-    if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-      echo "ai_changelog enabled but OPENROUTER_API_KEY is unset." >&2
-      if [ "$RELEASE_AI_CHANGELOG_FALLBACK" != true ]; then
-        exit 1
-      fi
-      echo "Using heuristic changelog fallback."
-    else
-      echo "Generating changelog via OpenRouter (${OPENROUTER_MODEL:-openai/gpt-4o-mini})..."
-      if TODAY="$TODAY" bash "${SCRIPT_DIR}/ai-changelog.sh" "$DUMP_FILE" > /tmp/changelog-entry.ai.md; then
-        mv /tmp/changelog-entry.ai.md /tmp/changelog-entry.md
-        echo "AI changelog applied."
-      else
-        echo "AI changelog failed." >&2
-        if [ "$RELEASE_AI_CHANGELOG_FALLBACK" != true ]; then
-          exit 1
+    REPO_SLUG="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+    if [ "$RELEASE_VERSION_BUMP" = true ] && [ "$RELEASE_INTERMEDIATE_CHANGELOG" = true ]; then
+      prev_for_link="$CURRENT"
+      for ((i = 0; i < ${#CHANGE_VERSIONS[@]}; i++)); do
+        version="${CHANGE_VERSIONS[$i]}"
+        link_line="[${version}]: https://github.com/${REPO_SLUG}/compare/v${prev_for_link}...v${version}"
+        if grep -q "^\[${version}\]:" CHANGELOG.md; then
+          sed -i "s|^\[${version}\]:.*|${link_line}|" CHANGELOG.md
+        else
+          echo "" >> CHANGELOG.md
+          echo "$link_line" >> CHANGELOG.md
         fi
-        echo "Using heuristic changelog fallback."
-      fi
-    fi
-  else
-    echo "ai_changelog disabled; using heuristic changelog."
-  fi
-
-  awk -v entry_file="/tmp/changelog-entry.md" '
-    BEGIN { while ((getline line < entry_file) > 0) entry = entry line "\n"; close(entry_file) }
-    /^## \[/ && !inserted { print entry; inserted=1 }
-    { print }
-  ' CHANGELOG.md > CHANGELOG.md.tmp
-  mv CHANGELOG.md.tmp CHANGELOG.md
-
-  REPO_SLUG="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
-  if [ "$RELEASE_VERSION_BUMP" = true ] && [ "$RELEASE_INTERMEDIATE_CHANGELOG" = true ]; then
-    prev_for_link="$CURRENT"
-    for ((i = 0; i < ${#CHANGE_VERSIONS[@]}; i++)); do
-      version="${CHANGE_VERSIONS[$i]}"
-      link_line="[${version}]: https://github.com/${REPO_SLUG}/compare/v${prev_for_link}...v${version}"
-      if grep -q "^\[${version}\]:" CHANGELOG.md; then
-        sed -i "s|^\[${version}\]:.*|${link_line}|" CHANGELOG.md
+        prev_for_link="$version"
+      done
+    elif [ "$RELEASE_VERSION_BUMP" = true ]; then
+      link_line="[${NEW_VERSION}]: https://github.com/${REPO_SLUG}/compare/v${CURRENT}...v${NEW_VERSION}"
+      if grep -q "^\[${NEW_VERSION}\]:" CHANGELOG.md; then
+        sed -i "s|^\[${NEW_VERSION}\]:.*|${link_line}|" CHANGELOG.md
       else
         echo "" >> CHANGELOG.md
         echo "$link_line" >> CHANGELOG.md
       fi
-      prev_for_link="$version"
-    done
-  elif [ "$RELEASE_VERSION_BUMP" = true ]; then
-    link_line="[${NEW_VERSION}]: https://github.com/${REPO_SLUG}/compare/v${CURRENT}...v${NEW_VERSION}"
-    if grep -q "^\[${NEW_VERSION}\]:" CHANGELOG.md; then
-      sed -i "s|^\[${NEW_VERSION}\]:.*|${link_line}|" CHANGELOG.md
-    else
-      echo "" >> CHANGELOG.md
-      echo "$link_line" >> CHANGELOG.md
     fi
+    echo "Updated CHANGELOG.md (internal)."
+  else
+    echo "changelog_internal disabled; leaving CHANGELOG.md unchanged."
+  fi
+
+  if [ "$RELEASE_CHANGELOG_EXTERNAL" = true ]; then
+    write_fallback_external
+    maybe_ai_changelog external /tmp/changelog-external-entry.md /tmp/changelog-external-entry.md \
+      || exit 1
+    if [ ! -f CHANGELOG.external.md ]; then
+      cat > CHANGELOG.external.md <<'EOF'
+# What's new
+
+Simple, user-friendly release notes. For technical details see [CHANGELOG.md](./CHANGELOG.md).
+
+EOF
+    fi
+    insert_before_first_heading CHANGELOG.external.md /tmp/changelog-external-entry.md
+    echo "Updated CHANGELOG.external.md (external)."
+  else
+    echo "changelog_external disabled; leaving CHANGELOG.external.md unchanged."
   fi
 else
-  echo "changelog disabled; leaving CHANGELOG.md unchanged."
+  echo "Both changelogs disabled; leaving changelog files unchanged."
 fi
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then

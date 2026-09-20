@@ -11,6 +11,8 @@ CONFIG="${RELEASE_CONFIG_PATH:-$ROOT/.github/release-config.yml}"
 declare -A DEFAULTS=(
   [version_bump]=true
   [changelog]=true
+  [changelog_internal]=true
+  [changelog_external]=true
   [ai_changelog]=false
   [ai_changelog_fallback]=true
   [commit_release]=true
@@ -70,6 +72,8 @@ resolve() {
 
 VERSION_BUMP="$(normalize_bool "$(resolve version_bump)")"
 CHANGELOG="$(normalize_bool "$(resolve changelog)")"
+CHANGELOG_INTERNAL="$(normalize_bool "$(resolve changelog_internal)")"
+CHANGELOG_EXTERNAL="$(normalize_bool "$(resolve changelog_external)")"
 AI_CHANGELOG="$(normalize_bool "$(resolve ai_changelog)")"
 AI_CHANGELOG_FALLBACK="$(normalize_bool "$(resolve ai_changelog_fallback)")"
 COMMIT_RELEASE="$(normalize_bool "$(resolve commit_release)")"
@@ -83,13 +87,18 @@ if [ -n "${OPENROUTER_MODEL:-}" ]; then
   OPENROUTER_MODEL_VAL="$OPENROUTER_MODEL"
 fi
 
+if [ "$CHANGELOG" != true ]; then
+  CHANGELOG_INTERNAL=false
+  CHANGELOG_EXTERNAL=false
+fi
+
 if [ "$TAG_RELEASE" = true ] && [ "$COMMIT_RELEASE" = false ]; then
   echo "tag_release requires commit_release; forcing tag_release=false" >&2
   TAG_RELEASE=false
 fi
 
-if [ "$AI_CHANGELOG" = true ] && [ "$CHANGELOG" = false ]; then
-  echo "ai_changelog requires changelog; forcing ai_changelog=false" >&2
+if [ "$AI_CHANGELOG" = true ] && [ "$CHANGELOG_INTERNAL" != true ] && [ "$CHANGELOG_EXTERNAL" != true ]; then
+  echo "ai_changelog requires a changelog audience; forcing ai_changelog=false" >&2
   AI_CHANGELOG=false
 fi
 
@@ -100,6 +109,8 @@ fi
 
 export RELEASE_VERSION_BUMP="$VERSION_BUMP"
 export RELEASE_CHANGELOG="$CHANGELOG"
+export RELEASE_CHANGELOG_INTERNAL="$CHANGELOG_INTERNAL"
+export RELEASE_CHANGELOG_EXTERNAL="$CHANGELOG_EXTERNAL"
 export RELEASE_AI_CHANGELOG="$AI_CHANGELOG"
 export RELEASE_AI_CHANGELOG_FALLBACK="$AI_CHANGELOG_FALLBACK"
 export RELEASE_COMMIT_RELEASE="$COMMIT_RELEASE"
@@ -123,6 +134,8 @@ emit() {
 
 emit RELEASE_VERSION_BUMP "$VERSION_BUMP"
 emit RELEASE_CHANGELOG "$CHANGELOG"
+emit RELEASE_CHANGELOG_INTERNAL "$CHANGELOG_INTERNAL"
+emit RELEASE_CHANGELOG_EXTERNAL "$CHANGELOG_EXTERNAL"
 emit RELEASE_AI_CHANGELOG "$AI_CHANGELOG"
 emit RELEASE_AI_CHANGELOG_FALLBACK "$AI_CHANGELOG_FALLBACK"
 emit RELEASE_COMMIT_RELEASE "$COMMIT_RELEASE"
@@ -132,4 +145,4 @@ emit RELEASE_INTERMEDIATE_CHANGELOG "$INTERMEDIATE_CHANGELOG"
 emit RELEASE_OPENROUTER_MODEL "$OPENROUTER_MODEL_VAL"
 emit OPENROUTER_MODEL "$OPENROUTER_MODEL_VAL"
 
-echo "Switches: bump=${VERSION_BUMP} changelog=${CHANGELOG} ai=${AI_CHANGELOG} commit=${COMMIT_RELEASE} tag=${TAG_RELEASE} sequential=${SEQUENTIAL_BUMPS} intermediate=${INTERMEDIATE_CHANGELOG}" >&2
+echo "Switches: bump=${VERSION_BUMP} changelog=${CHANGELOG} internal=${CHANGELOG_INTERNAL} external=${CHANGELOG_EXTERNAL} ai=${AI_CHANGELOG} commit=${COMMIT_RELEASE} tag=${TAG_RELEASE} sequential=${SEQUENTIAL_BUMPS} intermediate=${INTERMEDIATE_CHANGELOG}" >&2

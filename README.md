@@ -5,11 +5,12 @@ A minimal GitHub repository template with **post-merge semver bumping** and rele
 ## What's included
 
 - `VERSION` — current semver (`MAJOR.MINOR.PATCH`)
-- `CHANGELOG.md` — [Keep a Changelog](https://keepachangelog.com/) format
+- `CHANGELOG.md` — internal technical notes ([Keep a Changelog](https://keepachangelog.com/))
+- `CHANGELOG.external.md` — simple emoji user-facing “What's new”
 - `.github/release-config.yml` — feature switches (bump, AI changelog, tag, …)
 - `.github/workflows/release.yml` — release job + manual `workflow_dispatch` toggles
 - `.github/scripts/bump-version.sh` — semver bumps from commit messages
-- `.github/scripts/ai-changelog.sh` — optional OpenRouter changelog rewrite
+- `.github/scripts/ai-changelog.sh` — optional OpenRouter rewrite (internal + external)
 - `.github/scripts/load-release-config.sh` — loads switches into the job
 - `.cursor/rules/_commit-semver.mdc` — always require `(major)` / `(minor)` / `(patch)` in commits
 
@@ -20,8 +21,10 @@ Edit `.github/release-config.yml` (or override with `RELEASE_*` env / Actions va
 | Switch | Default | Effect |
 |--------|---------|--------|
 | `version_bump` | `true` | Update `VERSION` from commits |
-| `changelog` | `true` | Update `CHANGELOG.md` |
-| `ai_changelog` | `false` | Rewrite changelog via OpenRouter |
+| `changelog` | `true` | Master switch for both changelog files |
+| `changelog_internal` | `true` | Update technical `CHANGELOG.md` |
+| `changelog_external` | `true` | Update emoji `CHANGELOG.external.md` |
+| `ai_changelog` | `false` | Rewrite changelogs via OpenRouter |
 | `ai_changelog_fallback` | `true` | Keep heuristic notes if AI fails |
 | `commit_release` | `true` | Commit release files to `main` |
 | `tag_release` | `true` | Push `vX.Y.Z` (needs `commit_release`) |
@@ -30,6 +33,11 @@ Edit `.github/release-config.yml` (or override with `RELEASE_*` env / Actions va
 | `openrouter_model` | `openai/gpt-4o-mini` | OpenRouter model id |
 
 Manual runs: **Actions → Release → Run workflow** exposes the same toggles for a one-off job.
+
+## Changelogs
+
+- **Internal** (`CHANGELOG.md`): precise maintainer notes, Keep a Changelog sections.
+- **External** (`CHANGELOG.external.md`): short friendly bullets, each with an emoji (✨ 🐛 ⚡ 🔧 💥 📦).
 
 ## How it works
 
@@ -42,10 +50,8 @@ Manual runs: **Actions → Release → Run workflow** exposes the same toggles f
    - `(patch)` or `fix:` / `perf:` / `refactor:` → **patch**
    - anything else → **patch**
 
-   Example from `1.0.0`: patch → `1.0.1`, then minor → `1.1.0`, then patch → `1.1.1`.
-
 Prefer an explicit `(major)`, `(minor)`, or `(patch)` tag on every commit (enforced via Cursor rules).
-5. Writes `VERSION` / `CHANGELOG.md` according to switches (AI dump when `ai_changelog: true` + `OPENROUTER_API_KEY`).
+5. Writes `VERSION` and both changelogs according to switches (AI when `ai_changelog: true` + `OPENROUTER_API_KEY`).
 6. Commits `chore(release): bump version to X.Y.Z` and tags `vX.Y.Z` when those switches are on.
 7. If HEAD is already `chore(release):`, the workflow skips (no loop).
 
@@ -54,6 +60,8 @@ Prefer an explicit `(major)`, `(minor)`, or `(patch)` tag on every commit (enfor
 1. Set `ai_changelog: true` in `.github/release-config.yml`.
 2. Create a key at [openrouter.ai/keys](https://openrouter.ai/keys).
 3. Repo **Settings → Secrets and variables → Actions**: secret `OPENROUTER_API_KEY` (optional variable `OPENROUTER_MODEL` overrides config).
+
+AI generates a technical internal draft and a separate emoji external draft from the same commit dump.
 
 ## Suggested workflow
 
