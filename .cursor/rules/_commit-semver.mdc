@@ -1,0 +1,36 @@
+---
+description: Require an explicit major/minor/patch bump tag in every commit message
+alwaysApply: true
+---
+
+# Commit semver tags
+
+Every commit message **must** include an explicit bump tag so releases are intentional:
+
+| Tag | Effect |
+|-----|--------|
+| `(major)` | breaking / incompatible change |
+| `(minor)` | new feature, backward compatible |
+| `(patch)` | fix, perf, refactor, docs, chore, etc. |
+
+## Format
+
+```text
+type(scope): summary (major|minor|patch)
+```
+
+Examples:
+
+```text
+feat(api): add pagination (minor)
+fix(auth): handle expired token (patch)
+refactor!: drop legacy v1 routes (major)
+docs: clarify release flow (patch)
+```
+
+## Rules for the agent
+
+- When creating or drafting commits, **always** append `(major)`, `(minor)`, or `(patch)`.
+- Prefer `(minor)` for user-visible features, `(patch)` for fixes and non-feature work, `(major)` only for breaking changes.
+- Do not rely on `feat:` / `fix:` alone — the bump tag is required even when conventional prefixes are used.
+- Skip the tag only for automated `chore(release):` commits produced by CI.

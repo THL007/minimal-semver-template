@@ -1,0 +1,30 @@
+# Release feature switches for CI.
+# Env overrides (optional): RELEASE_<KEY_IN_UPPERCASE>=true|false
+# Example: RELEASE_AI_CHANGELOG=true
+
+# Bump VERSION from commit history (sequential unless sequential_bumps is false)
+version_bump: true
+
+# Update CHANGELOG.md during release
+changelog: true
+
+# Rewrite changelog via OpenRouter (needs OPENROUTER_API_KEY secret)
+ai_changelog: false
+
+# If AI fails, keep the heuristic changelog instead of failing the job
+ai_changelog_fallback: true
+
+# Commit VERSION/CHANGELOG back to main as chore(release):
+commit_release: true
+
+# Push annotated tag vX.Y.Z for the final version (requires commit_release)
+tag_release: true
+
+# Apply one bump per commit oldest→newest (false = single highest bump)
+sequential_bumps: true
+
+# One changelog section per intermediate version (false = final version only)
+intermediate_changelog: true
+
+# OpenRouter model id (also overridable via OPENROUTER_MODEL / RELEASE_OPENROUTER_MODEL)
+openrouter_model: openai/gpt-4o-mini

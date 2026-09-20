@@ -3,6 +3,36 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Bump VERSION from commits"
+        type: boolean
+        default: true
+      changelog:
+        description: "Update CHANGELOG.md"
+        type: boolean
+        default: true
+      ai_changelog:
+        description: "Rewrite changelog via OpenRouter"
+        type: boolean
+        default: false
+      commit_release:
+        description: "Commit release files to main"
+        type: boolean
+        default: true
+      tag_release:
+        description: "Push vX.Y.Z tag"
+        type: boolean
+        default: true
+      sequential_bumps:
+        description: "Sequential per-commit bumps"
+        type: boolean
+        default: true
+      intermediate_changelog:
+        description: "Changelog section per intermediate version"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -23,9 +53,32 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Load release switches
+        id: switches
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            export RELEASE_VERSION_BUMP='${{ inputs.version_bump }}'
+            export RELEASE_CHANGELOG='${{ inputs.changelog }}'
+            export RELEASE_AI_CHANGELOG='${{ inputs.ai_changelog }}'
+            export RELEASE_COMMIT_RELEASE='${{ inputs.commit_release }}'
+            export RELEASE_TAG_RELEASE='${{ inputs.tag_release }}'
+            export RELEASE_SEQUENTIAL_BUMPS='${{ inputs.sequential_bumps }}'
+            export RELEASE_INTERMEDIATE_CHANGELOG='${{ inputs.intermediate_changelog }}'
+          fi
+          bash .github/scripts/load-release-config.sh
+
       - name: Check if release is needed
         id: check
         run: |
+          if [[ "${{ steps.switches.outputs.RELEASE_VERSION_BUMP }}" != "true" && "${{ steps.switches.outputs.RELEASE_CHANGELOG }}" != "true" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping: version_bump and changelog are both disabled."
+            exit 0
+          fi
+
           HEAD_SUBJECT="$(git log -1 --format=%s HEAD)"
           if [[ "$HEAD_SUBJECT" =~ ^chore\(release\): ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -64,13 +117,25 @@ jobs:
         env:
           ANALYZE_RANGE: ${{ steps.check.outputs.analyze_range }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ steps.switches.outputs.OPENROUTER_MODEL }}
+          RELEASE_VERSION_BUMP: ${{ steps.switches.outputs.RELEASE_VERSION_BUMP }}
+          RELEASE_CHANGELOG: ${{ steps.switches.outputs.RELEASE_CHANGELOG }}
+          RELEASE_AI_CHANGELOG: ${{ steps.switches.outputs.RELEASE_AI_CHANGELOG }}
+          RELEASE_AI_CHANGELOG_FALLBACK: ${{ steps.switches.outputs.RELEASE_AI_CHANGELOG_FALLBACK }}
+          RELEASE_SEQUENTIAL_BUMPS: ${{ steps.switches.outputs.RELEASE_SEQUENTIAL_BUMPS }}
+          RELEASE_INTERMEDIATE_CHANGELOG: ${{ steps.switches.outputs.RELEASE_INTERMEDIATE_CHANGELOG }}
         run: bash .github/scripts/bump-version.sh
 
       - name: Commit release to main
-        if: steps.check.outputs.skip != 'true'
+        if: steps.check.outputs.skip != 'true' && steps.switches.outputs.RELEASE_COMMIT_RELEASE == 'true'
         id: commit
         run: |
-          if git diff --quiet VERSION CHANGELOG.md; then
+          FILES=()
+          git diff --quiet VERSION || FILES+=(VERSION)
+          git diff --quiet CHANGELOG.md || FILES+=(CHANGELOG.md)
+
+          if [ "${#FILES[@]}" -eq 0 ]; then
             echo "released=false" >> "$GITHUB_OUTPUT"
             echo "No version file changes produced."
             exit 0
@@ -80,14 +145,17 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
-          git add VERSION CHANGELOG.md
+          git add "${FILES[@]}"
           git commit -m "chore(release): bump version to ${NEW_VERSION}"
           git push origin main
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Tag release on main
-        if: steps.commit.outputs.released == 'true'
+        if: >-
+          steps.check.outputs.skip != 'true'
+          && steps.switches.outputs.RELEASE_TAG_RELEASE == 'true'
+          && steps.commit.outputs.released == 'true'
         run: |
           VERSION="$(tr -d '[:space:]' < VERSION)"
           VERSION="${VERSION#v}"
