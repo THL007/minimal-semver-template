@@ -2,6 +2,11 @@
 
 Simple, user-friendly release notes. For technical details see [CHANGELOG.md](./CHANGELOG.md).
 
+## ✨ 0.3.0 — 2026-09-20
+
+- ✨ add internal and emoji external changelogs
+
+
 ## ✨ 0.2.0 — 2026-09-20
 
 - ✨ Release switches, sequential version bumps, and optional AI changelog writing

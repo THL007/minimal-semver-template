@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 For a simple, user-facing summary see [CHANGELOG.external.md](./CHANGELOG.external.md).
 
+## [0.3.0] - 2026-09-20
+
+### Added
+
+- add internal and emoji external changelogs
+
+
 ## [0.2.0] - 2026-09-20
 
 ### Added
@@ -20,3 +27,5 @@ For a simple, user-facing summary see [CHANGELOG.external.md](./CHANGELOG.extern
 - Initial template with post-merge semver release CI/CD
 
 [0.2.0]: https://github.com/THL007/minimal-semver-template/compare/v0.1.0...v0.2.0
+
+[0.3.0]: https://github.com/THL007/minimal-semver-template/compare/v0.2.0...v0.3.0
