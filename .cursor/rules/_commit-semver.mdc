@@ -16,21 +16,22 @@ Every commit message **must** include an explicit bump tag so releases are inten
 ## Format
 
 ```text
-type(scope): summary (major|minor|patch)
+type(scope): <# if available> (major|minor|patch) summary
 ```
 
 Examples:
 
 ```text
-feat(api): add pagination (minor)
-fix(auth): handle expired token (patch)
-refactor!: drop legacy v1 routes (major)
-docs: clarify release flow (patch)
+feat(api): #42 (minor) add pagination
+fix(auth): (patch) handle expired token
+refactor!: (major) drop legacy v1 routes
+docs: (patch) clarify release flow
 ```
 
 ## Rules for the agent
 
-- When creating or drafting commits, **always** append `(major)`, `(minor)`, or `(patch)`.
+- When creating or drafting commits, **always** include `(major)`, `(minor)`, or `(patch)` after the optional issue/PR `#` and before the summary.
+- Include `#<number>` when an issue or PR number is available; otherwise omit it.
 - Prefer `(minor)` for user-visible features, `(patch)` for fixes and non-feature work, `(major)` only for breaking changes.
 - Do not rely on `feat:` / `fix:` alone — the bump tag is required even when conventional prefixes are used.
 - Skip the tag only for automated `chore(release):` commits produced by CI.
